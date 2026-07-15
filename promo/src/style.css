@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+/* Catppuccin Mocha — same palette as the app */
+:root {
+    --crust:   #11111b;
+    --mantle:  #181825;
+    --base:    #1e1e2e;
+    --surface0:#313244;
+    --surface1:#45475a;
+    --overlay: #6c7086;
+    --subtext: #a6adc8;
+    --text:    #cdd6f4;
+    --blue:    #89b4fa;
+    --mauve:   #cba6f7;
+    --green:   #a6e3a1;
+    --red:     #f38ba8;
+    --yellow:  #f9e2af;
+    --peach:   #fab387;
+    --teal:    #94e2d5;
+}
+
+html, body, #root {
+    min-height: 100%;
+    background-color: var(--crust);
+    color: var(--text);
+}
+body {
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    scroll-behavior: smooth;
+}
+
+::selection { background: color-mix(in srgb, var(--mauve) 35%, transparent); }
+
+*, *::before, *::after { overscroll-behavior-x: none; }
+
+/* Colour helpers used by the demo terminal */
+.c-text  { color: var(--text); }
+.c-sub   { color: var(--subtext); }
+.c-green { color: var(--green); }
+.c-blue  { color: var(--blue); }
+.c-mauve { color: var(--mauve); }
+.c-peach { color: var(--peach); }
+
+/* Ambient glow behind the hero */
+.hero-glow {
+    background:
+        radial-gradient(60% 55% at 50% 0%, color-mix(in srgb, var(--blue) 22%, transparent), transparent 70%),
+        radial-gradient(45% 45% at 80% 20%, color-mix(in srgb, var(--mauve) 16%, transparent), transparent 70%);
+}
+
+/* Faint grid texture */
+.grid-bg {
+    background-image:
+        linear-gradient(color-mix(in srgb, var(--surface0) 55%, transparent) 1px, transparent 1px),
+        linear-gradient(90deg, color-mix(in srgb, var(--surface0) 55%, transparent) 1px, transparent 1px);
+    background-size: 44px 44px;
+    -webkit-mask-image: radial-gradient(70% 60% at 50% 30%, #000 30%, transparent 75%);
+            mask-image: radial-gradient(70% 60% at 50% 30%, #000 30%, transparent 75%);
+}
+
+/* Blinking terminal cursor */
+.term-cursor {
+    display: inline-block;
+    width: 0.55em;
+    height: 1.05em;
+    vertical-align: text-bottom;
+    background: var(--blue);
+    animation: blink 1.05s steps(1) infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+/* Reveal-on-scroll */
+.reveal {
+    opacity: 0;
+    transform: translateY(14px);
+    transition: opacity .6s ease, transform .6s ease;
+}
+.reveal.in { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+    .reveal { opacity: 1; transform: none; transition: none; }
+    .term-cursor { animation: none; }
+    body { scroll-behavior: auto; }
+}

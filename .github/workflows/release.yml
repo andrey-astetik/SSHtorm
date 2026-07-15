@@ -1,0 +1,54 @@
+name: Build & release installers
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write   # create the release and upload assets
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest      # Apple Silicon → .dmg
+            build: mac_build
+          - os: windows-latest    # → .exe (NSIS installer)
+            build: win_build
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # electron bundles web-app/dist via extraResources — build it first
+      - name: Build renderer (web-app)
+        working-directory: web-app
+        run: |
+          npm install
+          npm run build
+
+      - name: Install electron deps
+        working-directory: electron
+        run: npm install
+
+      - name: Build installer
+        working-directory: electron
+        run: npm run ${{ matrix.build }}
+        env:
+          # no code-signing certs in CI → build an unsigned app instead of
+          # trying to grab a random identity from the keychain
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            electron/dist/*.dmg
+            electron/dist/*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

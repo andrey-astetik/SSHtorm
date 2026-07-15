@@ -1,0 +1,11 @@
+node_modules/
+web-app/dist/
+promo/dist/
+electron/dist/
+electron/tmp/
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+docs/
