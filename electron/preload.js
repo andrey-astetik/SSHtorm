@@ -52,7 +52,16 @@ contextBridge.exposeInMainWorld('app', {
         // Remote machine's UA/timezone profile: { userAgent, timezoneId, osName }.
         profile: (sessionId) => ipcRenderer.invoke('browser.profile', { sessionId }),
         // Apply UA + clock override to a webview (by getWebContentsId()).
-        applyProfile: (sessionId, webContentsId) => ipcRenderer.invoke('browser.applyProfile', { sessionId, webContentsId })
+        applyProfile: (sessionId, webContentsId) => ipcRenderer.invoke('browser.applyProfile', { sessionId, webContentsId }),
+        // Drop all browser data (cookies/cache/storage + history) for this host.
+        clearData: (sessionId) => ipcRenderer.invoke('browser.clearData', { sessionId })
+    },
+
+    // Per-host browser history, persisted encrypted in the vault.
+    history: {
+        add: (sessionId, url, title) => ipcRenderer.invoke('history.add', { sessionId, url, title }),
+        list: (sessionId) => ipcRenderer.invoke('history.list', { sessionId }),
+        clear: (sessionId) => ipcRenderer.invoke('history.clear', { sessionId })
     },
 
     // Local port forwarding (ssh -L) over the session's SSH connection.
@@ -73,6 +82,12 @@ contextBridge.exposeInMainWorld('app', {
         stats: (sessionId) => ipcRenderer.invoke('docker.stats', { sessionId }),
         // action ∈ start|stop|restart|pause|unpause|remove|image-remove
         action: (sessionId, action, id) => ipcRenderer.invoke('docker.action', { sessionId, action, id })
+    },
+
+    // Per-host notes, persisted encrypted in the vault (client-side only).
+    notes: {
+        load: (sessionId) => ipcRenderer.invoke('notes.load', { sessionId }),
+        save: (sessionId, text) => ipcRenderer.invoke('notes.save', { sessionId, text })
     },
 
     getNativeMaxState: () => ipcRenderer.invoke('get-native-max-state'),

@@ -11,10 +11,6 @@ function deriveKey(password, salt) {
     return crypto.pbkdf2Sync(password, salt, PBKDF2_ITERATIONS, KEY_LENGTH, 'sha512');
 }
 
-function hashPassword(password, salt) {
-    return crypto.pbkdf2Sync(password, salt, PBKDF2_ITERATIONS, 64, 'sha512').toString('hex');
-}
-
 function encrypt(text, password, salt) {
     const key = deriveKey(password, salt);
     const iv = crypto.randomBytes(IV_LENGTH);
@@ -42,4 +38,4 @@ function generateSalt() {
     return crypto.randomBytes(SALT_LENGTH).toString('hex');
 }
 
-module.exports = { encrypt, decrypt, hashPassword, generateSalt };
+module.exports = { encrypt, decrypt, generateSalt };

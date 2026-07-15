@@ -13,7 +13,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
-const { encrypt, decrypt, hashPassword, generateSalt } = require('./modules/crypto');
+const { generateSalt } = require('./modules/crypto');
 const { createSocksServer } = require('./modules/socksProxy');
 const { createForward } = require('./modules/portForward');
 const docker = require('./modules/docker');
@@ -70,9 +70,15 @@ function saveMasterState(state) {
 
 function getMasterSalt() {
     const ms = getMasterState();
-    if (ms && ms.salt) return ms.salt;
+    if (ms && ms.salt) {
+        // Strip any legacy password hash left by older builds — that hash's
+        // prefix equalled the AES key, so it must not linger on disk.
+        if (ms.hash !== undefined) saveMasterState({ salt: ms.salt });
+        return ms.salt;
+    }
+    // Only the KDF salt is stored — never the password or a hash of it.
     const salt = generateSalt();
-    saveMasterState({ salt, hash: null });
+    saveMasterState({ salt });
     return salt;
 }
 
@@ -132,14 +138,24 @@ function destroySession(sessionId) {
 // dedicated Electron session partition whose only proxy is that SOCKS server.
 // The browser <webview> uses this partition, so every request it makes can only
 // leave the machine through this session's SSH connection.
-const browserPartition = (sessionId) => `ssh-browser-${sessionId}`;
+// Host identity used to key per-host state (notes, history, browser storage).
+const hostId = (sessionId) => {
+    const s = sessions[sessionId];
+    return s ? `${s.host}:${s.connectOpts?.port || 22}` : null;
+};
+// Persistent, per-host partition: the browser's cookies/storage survive across
+// reconnects and are isolated per server. The name is sanitised for a partition.
+const browserPartition = (sessionId) => {
+    const id = hostId(sessionId) || 'unknown';
+    return 'persist:ssh-browser-' + id.replace(/[^a-zA-Z0-9._-]/g, '_');
+};
+const configuredPartitions = new Set();   // partitions whose request/permission handlers are wired
 
 async function ensureBrowserProxy(sessionId) {
     const s = sessions[sessionId];
     if (!s || !s.connected) return { error: 'Not connected' };
 
-    const partition = browserPartition(sessionId);
-
+    // One SOCKS server per live SSH connection (started once for the session).
     if (!s.socks?.server) {
         const server = createSocksServer(() => {
             const cur = sessions[sessionId];
@@ -154,27 +170,29 @@ async function ensureBrowserProxy(sessionId) {
             return { error: 'Failed to start tunnel proxy: ' + e.message };
         }
         s.socks = { server, port: server.address().port };
+    }
 
-        const ses = electronSession.fromPartition(partition);
-        // fixed_servers + a single socks5 rule: no DIRECT fallback, so a dead
-        // tunnel fails closed instead of silently going direct. `<-loopback>`
-        // removes Chromium's implicit localhost bypass, forcing even loopback
-        // (and DNS) through the proxy.
-        await ses.setProxy({
-            mode: 'fixed_servers',
-            proxyRules: `socks5://127.0.0.1:${s.socks.port}`,
-            proxyBypassRules: '<-loopback>'
-        });
+    const partition = browserPartition(sessionId);
+    const ses = electronSession.fromPartition(partition);
 
-        // Only allow web/page schemes out. Everything else (file:, chrome:,
-        // devtools:, chrome-extension:, filesystem:, …) is cancelled so a page
-        // can neither read local files nor reach anything off the tunnel.
+    // The partition is persistent and reused across reconnects, so always repoint
+    // its proxy at THIS session's live SOCKS server. Single socks5 rule, no DIRECT
+    // fallback → a dead tunnel fails closed; `<-loopback>` forces loopback/DNS
+    // through the proxy too.
+    await ses.setProxy({
+        mode: 'fixed_servers',
+        proxyRules: `socks5://127.0.0.1:${s.socks.port}`,
+        proxyBypassRules: '<-loopback>'
+    });
+
+    // Scheme/permission lockdown only needs wiring once per partition:
+    //   - only web/page schemes out (file:, chrome:, devtools:, … cancelled)
+    //   - deny every permission (geo, camera, mic, clipboard, notifications…)
+    if (!configuredPartitions.has(partition)) {
+        configuredPartitions.add(partition);
         ses.webRequest.onBeforeRequest((details, cb) => {
             cb({ cancel: !/^(https?|wss?|about|blob|data):/i.test(details.url) });
         });
-
-        // Deny every permission request/check (geolocation, camera, mic,
-        // clipboard, notifications, …) — no side channel around the disguise.
         ses.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
         ses.setPermissionCheckHandler(() => false);
     }
@@ -877,6 +895,45 @@ app.whenReady().then(() => {
     ipcMain.handle('docker.stats', (e, { sessionId }) => dockerCall(sessionId, docker.stats));
     ipcMain.handle('docker.action', (e, { sessionId, action, id }) => dockerCall(sessionId, (conn) => docker.action(conn, action, id)));
 
+    // ─── Per-host notes (persisted encrypted in the vault, keyed by host:port) ──
+    ipcMain.handle('notes.load', (_e, { sessionId }) => {
+        const k = hostId(sessionId);
+        return (k && vault.isUnlocked()) ? vault.getNote(k) : '';
+    });
+    ipcMain.handle('notes.save', (_e, { sessionId, text }) => {
+        const k = hostId(sessionId);
+        if (k && vault.isUnlocked()) vault.setNote(k, text);
+        return { ok: !!(k && vault.isUnlocked()) };
+    });
+
+    // ─── Per-host browser history (persisted encrypted in the vault) ──
+    ipcMain.handle('history.add', (_e, { sessionId, url, title }) => {
+        const k = hostId(sessionId);
+        if (k && vault.isUnlocked() && url) vault.addHistory(k, { url, title: title || '', ts: Date.now() });
+        return { ok: true };
+    });
+    ipcMain.handle('history.list', (_e, { sessionId }) => {
+        const k = hostId(sessionId);
+        return (k && vault.isUnlocked()) ? vault.getHistory(k) : [];
+    });
+    ipcMain.handle('history.clear', (_e, { sessionId }) => {
+        const k = hostId(sessionId);
+        if (k && vault.isUnlocked()) vault.clearHistory(k);
+        return { ok: true };
+    });
+
+    // Drop ALL browser data for this host: cookies, cache, storage + history.
+    ipcMain.handle('browser.clearData', async (_e, { sessionId }) => {
+        try {
+            const ses = electronSession.fromPartition(browserPartition(sessionId));
+            await ses.clearStorageData();
+            await ses.clearCache();
+        } catch (e) { return { error: e.message }; }
+        const k = hostId(sessionId);
+        if (k && vault.isUnlocked()) vault.clearHistory(k);
+        return { ok: true };
+    });
+
     // Harden every browser <webview> the renderer attaches: keep it sandboxed,
     // strip preload/node access, and block WebRTC's non-proxied UDP so it cannot
     // leak the real IP around the SOCKS tunnel.
@@ -1015,32 +1072,32 @@ app.whenReady().then(() => {
                 }
                 break;
 
-            // Master password
+            // Master password. A password is "set" once an encrypted vault
+            // exists; it is verified by decrypting that vault (see below), so no
+            // password hash is stored anywhere.
             case 'master.status':
-                event.sender.send('sender', { method: 'master.status', data: { hasPassword: !!getMasterState()?.hash } });
+                event.sender.send('sender', { method: 'master.status', data: { hasPassword: fs.existsSync(vaultPath) } });
                 break;
             case 'master.set':
                 {
                     const { password } = payload;
-                    const salt = getMasterSalt();
-                    const hash = hashPassword(password, salt);
-                    saveMasterState({ salt, hash });
-                    vault.unlock(password);   // init empty vault for the new password
-                    vault.persist();          // ensure vault.json exists
+                    getMasterSalt();          // ensure the KDF salt exists in master.key
+                    vault.unlock(password);   // establish the vault for this password
+                    vault.persist();          // write vault.json (encrypted)
                     event.sender.send('sender', { method: 'master.set', data: { success: true } });
                 }
                 break;
             case 'master.verify':
                 {
                     const { password } = payload;
-                    const ms = getMasterState();
-                    if (!ms?.hash) {
+                    if (!fs.existsSync(vaultPath)) {
                         event.sender.send('sender', { method: 'master.verify', data: { success: false, error: 'No master password set' } });
                         break;
                     }
-                    const hash = hashPassword(password, ms.salt || getMasterSalt());
-                    if (hash === ms.hash) {
-                        vault.unlock(password);
+                    // Verify by decryption: the AES-256-GCM tag authenticates the
+                    // vault, so a wrong password fails to decrypt. This is why no
+                    // separate hash is kept — a stored hash would leak the key.
+                    if (vault.unlock(password)) {
                         event.sender.send('sender', { method: 'master.verify', data: { success: true, hosts: vault.getHosts() } });
                     } else {
                         event.sender.send('sender', { method: 'master.verify', data: { success: false, error: 'Wrong password' } });

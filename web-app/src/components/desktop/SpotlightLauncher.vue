@@ -6,7 +6,7 @@ const props = defineProps({
     connectedSessionId: Number
 });
 
-const emit = defineEmits(['open-terminal', 'open-files', 'open-connect', 'open-monitor', 'open-browser', 'open-docker', 'disconnect']);
+const emit = defineEmits(['open-terminal', 'open-files', 'open-connect', 'open-monitor', 'open-browser', 'open-docker', 'open-notes', 'disconnect']);
 
 const query = ref('');
 const visible = ref(false);
@@ -22,7 +22,7 @@ const hostLabel = computed(() => {
     if (!isConnected.value) return '';
     const sid = ssh.state.activeSessionId;
     const s = ssh.state.sessions[sid];
-    return s ? `${s.user}@${s.host}` : '';
+    return s ? (s.label || `${s.user}@${s.host}`) : '';
 });
 
 const allActions = computed(() => {
@@ -35,6 +35,7 @@ const allActions = computed(() => {
             { id: 'monitor',     icon: '📊',  label: 'System Monitor',  desc: 'CPU, RAM, processes, kill',        visible: true },
             { id: 'browser',     icon: '🌐',  label: 'Browser',         desc: 'Web browser tunnelled over SSH',   visible: true },
             { id: 'docker',      icon: '🐳',  label: 'Docker',          desc: 'Manage containers & images',       visible: true },
+            { id: 'notes',       icon: '📝',  label: 'Notes',           desc: `Notes for ${hostLabel.value} (saved locally)`, visible: true },
             { id: 'disconnect',  icon: '🔌',  label: 'Disconnect',      desc: `Disconnect from ${hostLabel.value}`, visible: true }
         );
     } else {
@@ -82,6 +83,7 @@ function selectAction(action) {
         case 'monitor':    emit('open-monitor');    break;
         case 'browser':    emit('open-browser');    break;
         case 'docker':     emit('open-docker');     break;
+        case 'notes':      emit('open-notes');      break;
         case 'connect':    emit('open-connect');    break;
         case 'disconnect': emit('disconnect');       break;
         case 'quit':

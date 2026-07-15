@@ -5,6 +5,7 @@ import { ssh } from '../../stores/ssh.js';
 const emit = defineEmits(['connected', 'close']);
 
 const form = reactive({
+    label: '',
     host: 'localhost',
     port: 22,
     username: 'root',
@@ -31,7 +32,7 @@ function loadSavedHosts() {
 }
 
 function saveHost() {
-    const entry = { host: form.host, port: form.port, username: form.username, password: form.password };
+    const entry = { host: form.host, port: form.port, username: form.username, password: form.password, label: form.label || '' };
     const raw = savedHosts.value.map(h => toRaw(h));
     const idx = raw.findIndex(h => h.host === entry.host && h.username === entry.username && h.port === entry.port);
     if (idx >= 0) raw[idx] = entry;
@@ -41,6 +42,7 @@ function saveHost() {
 }
 
 function selectHost(host) {
+    form.label = host.label || '';
     form.host = host.host;
     form.port = host.port;
     form.username = host.username;
@@ -71,6 +73,7 @@ function connect() {
 
     const sessionId = ssh.connect({
         host: form.host, port: form.port, username: form.username,
+        label: form.label || undefined,
         password: form.password || undefined,
         privateKey: form.privateKey || undefined
     });
@@ -110,41 +113,67 @@ onMounted(() => loadSavedHosts());
     <div class="connect-dialog">
         <h2 class="cd-title">SSH Connection</h2>
 
-        <div v-if="savedHosts.length" class="cd-saved">
-            <div class="cd-saved-title">Saved (click to connect):</div>
-            <div v-for="h in savedHosts" :key="h.host+h.username" class="cd-saved-item" @click="selectHost(h)" @dblclick="connectWith(h)">
-                <button class="cd-saved-delete" @click.stop="deleteHost(h)" title="Delete">✕</button>
-                <span class="cd-saved-label">{{ h.username }}@{{ h.host }}:{{ h.port }}</span>
-                <button class="cd-saved-connect" @click.stop="connectWith(h)">Connect</button>
+        <div class="cd-cols">
+            <!-- Left: known hosts -->
+            <div class="cd-col cd-col-left">
+                <div class="cd-saved-title">Saved hosts</div>
+                <div class="cd-saved-list">
+                    <div v-if="!savedHosts.length" class="cd-saved-empty">No saved hosts yet</div>
+                    <div v-for="h in savedHosts" :key="h.host+h.username" class="cd-saved-item" @click="selectHost(h)" @dblclick="connectWith(h)" title="Click to fill · double-click to connect">
+                        <button class="cd-saved-delete" @click.stop="deleteHost(h)" title="Delete">✕</button>
+                        <span class="cd-saved-label">
+                            <template v-if="h.label"><b class="cd-saved-name">{{ h.label }}</b><span class="cd-saved-sub">{{ h.username }}@{{ h.host }}:{{ h.port }}</span></template>
+                            <template v-else>{{ h.username }}@{{ h.host }}:{{ h.port }}</template>
+                        </span>
+                        <button class="cd-saved-connect" @click.stop="connectWith(h)" title="Connect">→</button>
+                    </div>
+                </div>
             </div>
-        </div>
 
-        <div class="cd-form">
-            <div class="cd-row"><label class="cd-label">Host</label><input v-model="form.host" class="cd-input" placeholder="192.168.1.1" /></div>
-            <div class="cd-row"><label class="cd-label">Port</label><input v-model.number="form.port" class="cd-input cd-input-short" type="number" /></div>
-            <div class="cd-row"><label class="cd-label">Username</label><input v-model="form.username" class="cd-input" placeholder="root" /></div>
-            <div class="cd-row"><label class="cd-label">Password</label><input v-model="form.password" class="cd-input" type="password" placeholder="Enter password" /></div>
-            <div v-if="showAdvanced" class="cd-row"><label class="cd-label">Private Key</label><textarea v-model="form.privateKey" class="cd-textarea" rows="4"></textarea></div>
-            <button class="cd-toggle" @click="showAdvanced=!showAdvanced">{{ showAdvanced ? '- Hide' : '+ Private key' }}</button>
-        </div>
+            <div class="cd-divider"></div>
 
-        <div v-if="error" class="cd-error">{{ error }}</div>
+            <!-- Right: connection form -->
+            <div class="cd-col cd-col-right">
+                <div class="cd-form">
+                    <div class="cd-row"><label class="cd-label">Label <span class="cd-optional">(optional)</span></label><input v-model="form.label" class="cd-input" placeholder="e.g. prod-01 — shown instead of user@host" /></div>
+                    <div class="cd-row"><label class="cd-label">Host</label><input v-model="form.host" class="cd-input" placeholder="192.168.1.1" /></div>
+                    <div class="cd-row"><label class="cd-label">Port</label><input v-model.number="form.port" class="cd-input cd-input-short" type="number" /></div>
+                    <div class="cd-row"><label class="cd-label">Username</label><input v-model="form.username" class="cd-input" placeholder="root" /></div>
+                    <div class="cd-row"><label class="cd-label">Password</label><input v-model="form.password" class="cd-input" type="password" placeholder="Enter password" /></div>
+                    <div v-if="showAdvanced" class="cd-row"><label class="cd-label">Private Key</label><textarea v-model="form.privateKey" class="cd-textarea" rows="4"></textarea></div>
+                    <button class="cd-toggle" @click="showAdvanced=!showAdvanced">{{ showAdvanced ? '- Hide' : '+ Private key' }}</button>
+                </div>
 
-        <div class="cd-actions">
-            <button class="cd-btn cd-btn-connect" :disabled="connecting" @click="connect">{{ connecting ? 'Connecting...' : 'Connect' }}</button>
-            <button class="cd-btn cd-btn-cancel" @click="$emit('close')">Cancel</button>
+                <div v-if="error" class="cd-error">{{ error }}</div>
+
+                <div class="cd-actions">
+                    <button class="cd-btn cd-btn-connect" :disabled="connecting" @click="connect">{{ connecting ? 'Connecting...' : 'Connect' }}</button>
+                    <button class="cd-btn cd-btn-cancel" @click="$emit('close')">Cancel</button>
+                </div>
+            </div>
         </div>
     </div>
 </template>
 
 <style scoped>
-.connect-dialog { padding: 20px; min-width: 380px; color: #cdd6f4; }
+.connect-dialog { padding: 20px; width: 600px; max-width: 100%; color: #cdd6f4; }
 .cd-title { margin: 0 0 16px; font-size: 18px; font-weight: 600; }
-.cd-saved { margin-bottom: 16px; }
-.cd-saved-title { font-size: 11px; text-transform: uppercase; color: #a6adc8; margin-bottom: 6px; }
+
+/* Two columns: known hosts | form, split by a vertical divider */
+.cd-cols { display: flex; align-items: stretch; }
+.cd-col { min-width: 0; }
+.cd-col-left { width: 220px; flex-shrink: 0; display: flex; flex-direction: column; }
+.cd-col-right { flex: 1; display: flex; flex-direction: column; }
+.cd-divider { width: 1px; align-self: stretch; background: #45475a; margin: 0 16px; flex-shrink: 0; }
+.cd-saved-list { flex: 1; overflow-y: auto; max-height: 380px; padding-right: 2px; }
+.cd-saved-empty { padding: 24px 8px; text-align: center; font-size: 12px; color: #6c7086; }
+.cd-saved-title { font-size: 11px; text-transform: uppercase; color: #a6adc8; margin-bottom: 8px; }
 .cd-saved-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; font-family: monospace; background: rgba(255,255,255,0.04); margin-bottom: 4px; transition: background 0.15s; }
 .cd-saved-item:hover { background: rgba(255,255,255,0.1); }
-.cd-saved-label { flex: 1; }
+.cd-saved-label { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.cd-saved-name { font-weight: 600; }
+.cd-saved-sub { font-size: 11px; color: #a6adc8; }
+.cd-optional { color: #6c7086; font-weight: 400; }
 .cd-saved-connect { padding: 2px 10px; border: none; border-radius: 4px; background: #89b4fa; color: #11111b; font-size: 11px; font-weight: 600; cursor: pointer; }
 .cd-saved-connect:hover { background: #74a8f5; }
 .cd-saved-delete { padding: 2px 6px; border: none; border-radius: 4px; background: transparent; color: #585b70; font-size: 11px; cursor: pointer; flex-shrink: 0; margin-right: 6px; }

@@ -4,7 +4,6 @@ import { ssh } from '../../stores/ssh.js';
 import CloseIcon from '../../compAst/icons/Close.vue';
 import ConnectionsIcon from '../../compAst/icons/Connections.vue';
 import PlusIcon from '../../compAst/icons/Plus.vue';
-import NoteIcon from '../../compAst/icons/Note.vue';
 import LogOutIcon from '../../compAst/icons/LogOut.vue';
 import CheckIcon from '../../compAst/icons/Check.vue';
 import BranchIcon from '../../compAst/icons/Branch.vue';
@@ -12,9 +11,6 @@ import TrashIcon from '../../compAst/icons/Trash.vue';
 import CopyIcon from '../../compAst/icons/Copy.vue';
 
 const emit = defineEmits(['close']);
-
-const noteText = ref('');
-const editingNote = ref(null);
 
 const sessions = computed(() => Object.values(ssh.state.sessions));
 const activeSid = computed(() => ssh.state.activeSessionId);
@@ -66,18 +62,6 @@ function copyForward(f) {
     setTimeout(() => { if (copied.value === f.id) copied.value = null; }, 1200);
 }
 function disconnectSid(sid) { ssh.disconnect(sid); }
-
-function startEditNote(sid) {
-    const s = ssh.state.sessions[sid];
-    editingNote.value = sid;
-    noteText.value = (s && s.note) || '';
-}
-function saveNote() {
-    const sid = editingNote.value;
-    if (sid && ssh.state.sessions[sid]) ssh.state.sessions[sid].note = noteText.value;
-    editingNote.value = null; noteText.value = '';
-}
-function cancelNote() { editingNote.value = null; noteText.value = ''; }
 function openConnect() { ssh.state.showConnectDialog = true; }
 </script>
 
@@ -111,18 +95,14 @@ function openConnect() { ssh.state.showConnectDialog = true; }
                 <div class="flex items-center justify-between">
                     <div class="flex items-center gap-2 min-w-0">
                         <span class="w-2 h-2 rounded-full shrink-0" :class="s.connected ? 'bg-[#a6e3a1]' : 'bg-[#585b70]'" />
-                        <span class="font-mono text-xs truncate text-[#cdd6f4]">{{ s.user }}@{{ s.host }}</span>
+                        <span class="text-xs truncate text-[#cdd6f4]" :class="s.label ? 'font-medium' : 'font-mono'" :title="s.user + '@' + s.host">{{ s.label || (s.user + '@' + s.host) }}</span>
                     </div>
                     <div class="flex items-center gap-0.5 shrink-0 ml-2">
-                        <button class="text-[#a6adc8] hover:text-[#cdd6f4] hover:bg-white/5 p-1 rounded transition-colors" title="Note" @click.stop="startEditNote(s.id)">
-                            <NoteIcon size="0.9em" />
-                        </button>
                         <button class="text-[#a6adc8] hover:text-[#f38ba8] hover:bg-[#f38ba8]/10 p-1 rounded transition-colors" title="Disconnect" @click.stop="disconnectSid(s.id)">
                             <LogOutIcon size="0.9em" />
                         </button>
                     </div>
                 </div>
-                <div v-if="s.note && editingNote !== s.id" class="text-[11px] text-[#a6adc8] italic truncate mt-0.5 ml-4">{{ s.note }}</div>
             </div>
         </div>
 
@@ -131,7 +111,7 @@ function openConnect() { ssh.state.showConnectDialog = true; }
             <div class="flex items-center gap-2 px-3 py-2 text-[#89b4fa]">
                 <BranchIcon size="1em" />
                 <span class="font-semibold text-xs text-[#cdd6f4]">Port forwarding</span>
-                <span class="font-mono text-[10px] text-[#6c7086] truncate ml-auto">{{ activeSession.host }}</span>
+                <span class="font-mono text-[10px] text-[#6c7086] truncate ml-auto">{{ activeSession.label || activeSession.host }}</span>
             </div>
 
             <!-- Active forwards -->
@@ -167,22 +147,6 @@ function openConnect() { ssh.state.showConnectDialog = true; }
                 </div>
                 <div v-if="fwError" class="text-[10px] text-[#f38ba8] mt-1">{{ fwError }}</div>
                 <div v-else class="text-[10px] text-[#6c7086] mt-1">local empty → auto-assigned. Reach it at localhost:&lt;local&gt;.</div>
-            </div>
-        </div>
-
-        <!-- Note editor -->
-        <div v-if="editingNote" class="px-3 py-2 border-t border-[#313244] shrink-0">
-            <textarea
-                v-model="noteText"
-                class="w-full p-1.5 border border-[#45475a] rounded bg-[#11111b] text-[#cdd6f4] text-xs resize-none outline-none focus:border-[#89b4fa] placeholder:text-[#585b70]"
-                rows="3"
-                placeholder="Note about this server..."
-            />
-            <div class="flex gap-1.5 mt-1.5">
-                <button class="flex items-center gap-1 px-2.5 py-1 bg-[#89b4fa] text-[#11111b] text-[11px] font-medium rounded hover:bg-[#74a8f5] transition-colors" @click="saveNote">
-                    <CheckIcon size="0.8em" /> Save
-                </button>
-                <button class="px-2.5 py-1 text-[11px] text-[#a6adc8] hover:bg-white/5 rounded transition-colors" @click="cancelNote">Cancel</button>
             </div>
         </div>
 

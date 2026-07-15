@@ -23,6 +23,9 @@ const activeId = ref(null);
 const editing = ref(false);         // address bar focused → don't auto-overwrite
 let tabCounter = 0;
 
+const menuOpen = ref(false);        // history / data menu
+const historyList = ref([]);
+
 const viewEls = {};                 // tab id → <webview> element
 const attached = new Set();         // tab ids whose listeners are wired
 
@@ -86,6 +89,30 @@ function goForward() { try { viewEls[activeId.value]?.goForward(); } catch (e) {
 function reload() { try { viewEls[activeId.value]?.reload(); } catch (e) {} }
 function stop() { try { viewEls[activeId.value]?.stop(); } catch (e) {} }
 
+// ─── History + data menu ────────────────────────────────
+function recordHistory(id) {
+    const el = viewEls[id]; const t = byId(id);
+    if (!el || !t) return;
+    let u = ''; try { u = el.getURL(); } catch (e) {}
+    if (!u || u === 'about:blank') return;
+    try { window.app?.history?.add(props.sessionId, u, t.title); } catch (e) {}
+}
+async function loadHistory() {
+    try { historyList.value = (await window.app?.history?.list(props.sessionId)) || []; }
+    catch (e) { historyList.value = []; }
+}
+async function toggleMenu() {
+    menuOpen.value = !menuOpen.value;
+    if (menuOpen.value) await loadHistory();
+}
+function openFromHistory(url) { menuOpen.value = false; newTab(url); }
+async function clearData() {
+    try { await window.app?.browser?.clearData(props.sessionId); } catch (e) {}
+    historyList.value = [];
+    menuOpen.value = false;
+    reload();   // reload the active tab so cleared cookies take effect
+}
+
 function onAddressBlur() {
     editing.value = false;
     const t = activeTab.value;
@@ -113,11 +140,12 @@ function attachListeners(id, el) {
     const t = byId(id);
     el.addEventListener('did-start-loading', () => { if (byId(id)) byId(id).loading = true; });
     el.addEventListener('did-stop-loading', () => { if (byId(id)) byId(id).loading = false; updateNav(id); });
-    el.addEventListener('did-navigate', () => updateNav(id));
+    el.addEventListener('did-navigate', () => { updateNav(id); recordHistory(id); });
     el.addEventListener('did-navigate-in-page', () => updateNav(id));
     el.addEventListener('page-title-updated', (e) => {
         const tt = byId(id);
         if (tt) tt.title = e.title || tt.url || 'Tab';
+        recordHistory(id);
     });
     el.addEventListener('did-fail-load', (e) => {
         if (e.errorCode === -3) return; // ABORTED
@@ -232,6 +260,24 @@ onMounted(async () => {
             />
 
             <span class="browser-lock" :title="profile ? `UA: ${profile.userAgent}\nTimezone: ${profile.timezoneId || 'host default'}` : 'Tunnelled through SSH'">🔒 SSH</span>
+
+            <button class="bb" :class="{ 'bb-active': menuOpen }" @click="toggleMenu" title="History &amp; data">🕘</button>
+        </div>
+
+        <!-- History / data menu -->
+        <div v-if="menuOpen" class="bw-menu-backdrop" @mousedown="menuOpen = false"></div>
+        <div v-if="menuOpen" class="bw-menu" @mousedown.stop>
+            <div class="bw-menu-head">
+                <span class="bw-menu-title-h">History</span>
+                <button class="bw-menu-clear" @click="clearData" title="Cookies, cache &amp; history for this host">Clear browsing data</button>
+            </div>
+            <div class="bw-menu-list">
+                <div v-if="!historyList.length" class="bw-menu-empty">No history yet</div>
+                <button v-for="(h, i) in historyList.slice().reverse()" :key="i" class="bw-menu-item" @click="openFromHistory(h.url)" :title="h.url">
+                    <span class="bw-menu-item-title">{{ h.title || h.url }}</span>
+                    <span class="bw-menu-item-url">{{ h.url }}</span>
+                </button>
+            </div>
         </div>
 
         <!-- TCP forwarding disabled on the server → nothing will load -->
@@ -262,7 +308,28 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.browser { display: flex; flex-direction: column; height: 100%; background: #1e1e2e; }
+.browser { display: flex; flex-direction: column; height: 100%; background: #1e1e2e; position: relative; }
+
+/* History / data menu */
+.bb-active { background: rgba(137,180,250,0.25); }
+.bw-menu-backdrop { position: absolute; inset: 0; z-index: 40; }
+.bw-menu {
+    position: absolute; top: 66px; right: 8px; z-index: 50;
+    width: 340px; max-width: calc(100% - 16px); max-height: 62%;
+    display: flex; flex-direction: column;
+    background: #181825; border: 1px solid #313244; border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.5); overflow: hidden;
+}
+.bw-menu-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border-bottom: 1px solid #313244; }
+.bw-menu-title-h { font-size: 12px; font-weight: 600; color: #cdd6f4; }
+.bw-menu-clear { font-size: 11px; padding: 3px 8px; border: none; border-radius: 6px; cursor: pointer; background: rgba(243,139,168,0.15); color: #f38ba8; }
+.bw-menu-clear:hover { background: rgba(243,139,168,0.28); }
+.bw-menu-list { overflow-y: auto; padding: 4px; }
+.bw-menu-empty { padding: 16px; text-align: center; color: #6c7086; font-size: 12px; }
+.bw-menu-item { display: flex; flex-direction: column; gap: 1px; width: 100%; text-align: left; padding: 6px 8px; border: none; border-radius: 6px; background: transparent; cursor: pointer; }
+.bw-menu-item:hover { background: rgba(255,255,255,0.05); }
+.bw-menu-item-title { font-size: 12px; color: #cdd6f4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bw-menu-item-url { font-size: 10px; color: #6c7086; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Tabs */
 .browser-tabs {

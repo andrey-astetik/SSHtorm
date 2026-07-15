@@ -11,6 +11,7 @@ import ImageViewer from '../components/desktop/ImageViewer.vue';
 import SystemMonitor from '../components/desktop/SystemMonitor.vue';
 import WebBrowser from '../components/desktop/WebBrowser.vue';
 import DockerManager from '../components/desktop/DockerManager.vue';
+import NotesApp from '../components/desktop/NotesApp.vue';
 import ConnectionPanel from '../components/desktop/ConnectionPanel.vue';
 import ConnectionDialog from '../components/desktop/ConnectionDialog.vue';
 import SpotlightLauncher from '../components/desktop/SpotlightLauncher.vue';
@@ -34,7 +35,7 @@ function loadHostsAfterUnlock() {
     }
 }
 
-// Windows visible on desktop — only from active session
+// Windows visible on desktop — only from the active session.
 const visibleWindows = computed(() =>
     windowManager.state.windows.filter(w => w.sessionId === ssh.state.activeSessionId)
 );
@@ -86,7 +87,7 @@ provide('openImageViewer', openImageViewer);
 // ─── App launchers ──────────────────────────────────
 function openTerminal(cwd = null, sessionId = null, initCmd = null, title = null) {
     const sid = sessionId || connectedSessionId.value;
-    const host = sid ? (ssh.state.sessions[sid]?.host || 'SSH') : 'SSH';
+    const host = sid ? (ssh.state.sessions[sid]?.label || ssh.state.sessions[sid]?.host || 'SSH') : 'SSH';
     const id = windowManager.openWindow({
         title: title || `Terminal — ${host}`,
         type: 'terminal',
@@ -158,6 +159,22 @@ function openDocker() {
     windowManager.updateWindow(id, { sessionId: connectedSessionId.value });
 }
 
+// Notes are per-host — bound to the active session, one window per host.
+function openNotes() {
+    const sid = connectedSessionId.value;
+    if (!sid) return;
+    const existing = windowManager.state.windows.find(w => w.type === 'notes' && w.sessionId === sid);
+    if (existing) { windowManager.focusWindow(existing.id); return; }
+    const s = ssh.state.sessions[sid];
+    const id = windowManager.openWindow({
+        title: 'Notes — ' + (s?.label || s?.host || 'host'),
+        type: 'notes',
+        component: 'NotesApp',
+        x: 220, y: 90, w: 620, h: 460, minW: 360, minH: 240
+    });
+    windowManager.updateWindow(id, { sessionId: sid });
+}
+
 function onDisconnect() {
     if (connectedSessionId.value) {
         ssh.disconnect(connectedSessionId.value);
@@ -188,6 +205,7 @@ function onDisconnect() {
             @open-monitor="openSystemMonitor"
             @open-browser="openBrowser"
             @open-docker="openDocker"
+            @open-notes="openNotes"
             @open-connect="ssh.state.showConnectDialog = true"
             @disconnect="onDisconnect"
         />
@@ -229,6 +247,10 @@ function onDisconnect() {
             />
             <DockerManager
                 v-else-if="win.component === 'DockerManager'"
+                :session-id="win.sessionId || connectedSessionId"
+            />
+            <NotesApp
+                v-else-if="win.component === 'NotesApp'"
                 :session-id="win.sessionId || connectedSessionId"
             />
             <div v-else class="window-placeholder">
@@ -293,8 +315,8 @@ function onDisconnect() {
     border: 1px solid #45475a;
     border-radius: 12px;
     box-shadow: 0 16px 48px rgba(0,0,0,0.5);
-    max-width: 460px;
-    width: 90%;
+    max-width: 680px;
+    width: 92%;
 }
 .window-placeholder {
     display: flex;

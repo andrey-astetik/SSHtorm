@@ -53,7 +53,7 @@ const _store = (() => {
         initIPCListener();
         if (!state._initialized && typeof window !== 'undefined') setTimeout(initIPCListener, 100);
         const sid = Date.now();
-        state.sessions[sid] = { id: sid, host: opts.host, user: opts.username, connected: false, shellActive: false, status: 'connecting', error: null };
+        state.sessions[sid] = { id: sid, host: opts.host, user: opts.username, label: opts.label || '', connected: false, shellActive: false, status: 'connecting', error: null };
         state.listeners[sid] = {};
         if (window.app) window.app.ssh.connect({ ...opts, sessionId: sid });
         else {
