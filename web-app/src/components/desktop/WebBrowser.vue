@@ -4,6 +4,7 @@ import { ssh } from '../../stores/ssh.js';
 import ChevronRight from '../../compAst/icons/ChevronRight.vue';
 import Repeat from '../../compAst/icons/Repeat.vue';
 import Plus from '../../compAst/icons/Plus.vue';
+import Clock from '../../compAst/icons/Clock.vue';
 
 const props = defineProps({
     sessionId: Number
@@ -261,7 +262,7 @@ onMounted(async () => {
 
             <span class="browser-lock" :title="profile ? `UA: ${profile.userAgent}\nTimezone: ${profile.timezoneId || 'host default'}` : 'Tunnelled through SSH'">🔒 SSH</span>
 
-            <button class="bb" :class="{ 'bb-active': menuOpen }" @click="toggleMenu" title="History &amp; data">🕘</button>
+            <button class="bb" :class="{ 'bb-active': menuOpen }" @click="toggleMenu" title="History &amp; data"><Clock size="1.1em" /></button>
         </div>
 
         <!-- History / data menu -->
@@ -324,9 +325,9 @@ onMounted(async () => {
 .bw-menu-title-h { font-size: 12px; font-weight: 600; color: #cdd6f4; }
 .bw-menu-clear { font-size: 11px; padding: 3px 8px; border: none; border-radius: 6px; cursor: pointer; background: rgba(243,139,168,0.15); color: #f38ba8; }
 .bw-menu-clear:hover { background: rgba(243,139,168,0.28); }
-.bw-menu-list { overflow-y: auto; padding: 4px; }
+.bw-menu-list { overflow-y: auto; overflow-x: hidden; padding: 4px; }
 .bw-menu-empty { padding: 16px; text-align: center; color: #6c7086; font-size: 12px; }
-.bw-menu-item { display: flex; flex-direction: column; gap: 1px; width: 100%; text-align: left; padding: 6px 8px; border: none; border-radius: 6px; background: transparent; cursor: pointer; }
+.bw-menu-item { display: flex; flex-direction: column; gap: 1px; width: 100%; min-width: 0; box-sizing: border-box; text-align: left; padding: 6px 8px; border: none; border-radius: 6px; background: transparent; cursor: pointer; }
 .bw-menu-item:hover { background: rgba(255,255,255,0.05); }
 .bw-menu-item-title { font-size: 12px; color: #cdd6f4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bw-menu-item-url { font-size: 10px; color: #6c7086; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -122,8 +122,11 @@ onMounted(() => loadSavedHosts());
                     <div v-for="h in savedHosts" :key="h.host+h.username" class="cd-saved-item" @click="selectHost(h)" @dblclick="connectWith(h)" title="Click to fill · double-click to connect">
                         <button class="cd-saved-delete" @click.stop="deleteHost(h)" title="Delete">✕</button>
                         <span class="cd-saved-label">
-                            <template v-if="h.label"><b class="cd-saved-name">{{ h.label }}</b><span class="cd-saved-sub">{{ h.username }}@{{ h.host }}:{{ h.port }}</span></template>
-                            <template v-else>{{ h.username }}@{{ h.host }}:{{ h.port }}</template>
+                            <template v-if="h.label">
+                                <span class="cd-saved-name">{{ h.label }}</span>
+                                <span class="cd-saved-sub">{{ h.username }}@{{ h.host }}:{{ h.port }}</span>
+                            </template>
+                            <span v-else class="cd-saved-name">{{ h.username }}@{{ h.host }}:{{ h.port }}</span>
                         </span>
                         <button class="cd-saved-connect" @click.stop="connectWith(h)" title="Connect">→</button>
                     </div>
@@ -156,25 +159,29 @@ onMounted(() => loadSavedHosts());
 </template>
 
 <style scoped>
-.connect-dialog { padding: 20px; width: 600px; max-width: 100%; color: #cdd6f4; }
+.connect-dialog { padding: 20px; color: #cdd6f4; }
 .cd-title { margin: 0 0 16px; font-size: 18px; font-weight: 600; }
 
-/* Two columns: known hosts | form, split by a vertical divider */
-.cd-cols { display: flex; align-items: stretch; }
+/* Two columns: known hosts | form, split by a vertical divider.
+   Relative flex ratios (2:3) + min-width:0 so both shrink together on narrow
+   screens instead of overflowing. */
+.cd-cols { display: flex; align-items: stretch; gap: 1rem; }
 .cd-col { min-width: 0; }
-.cd-col-left { width: 220px; flex-shrink: 0; display: flex; flex-direction: column; }
-.cd-col-right { flex: 1; display: flex; flex-direction: column; }
-.cd-divider { width: 1px; align-self: stretch; background: #45475a; margin: 0 16px; flex-shrink: 0; }
-.cd-saved-list { flex: 1; overflow-y: auto; max-height: 380px; padding-right: 2px; }
+.cd-col-left { flex: 2 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.cd-col-right { flex: 3 1 0; min-width: 0; display: flex; flex-direction: column; }
+.cd-divider { width: 1px; align-self: stretch; background: #45475a; flex-shrink: 0; }
+/* flex:1 + min-height:0 → the list fills the column (stretched to the form's
+   height) and scrolls internally, instead of driving the height itself. */
+.cd-saved-list { flex: 1 1 0; min-height: 0; overflow-y: auto; padding-right: 2px; }
 .cd-saved-empty { padding: 24px 8px; text-align: center; font-size: 12px; color: #6c7086; }
 .cd-saved-title { font-size: 11px; text-transform: uppercase; color: #a6adc8; margin-bottom: 8px; }
-.cd-saved-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; font-family: monospace; background: rgba(255,255,255,0.04); margin-bottom: 4px; transition: background 0.15s; }
+.cd-saved-item { display: flex; align-items: center; gap: 6px; overflow: hidden; padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; font-family: monospace; background: rgba(255,255,255,0.04); margin-bottom: 4px; transition: background 0.15s; }
 .cd-saved-item:hover { background: rgba(255,255,255,0.1); }
-.cd-saved-label { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.cd-saved-name { font-weight: 600; }
-.cd-saved-sub { font-size: 11px; color: #a6adc8; }
+.cd-saved-label { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+.cd-saved-name { font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cd-saved-sub { font-size: 11px; color: #a6adc8; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cd-optional { color: #6c7086; font-weight: 400; }
-.cd-saved-connect { padding: 2px 10px; border: none; border-radius: 4px; background: #89b4fa; color: #11111b; font-size: 11px; font-weight: 600; cursor: pointer; }
+.cd-saved-connect { flex-shrink: 0; padding: 2px 9px; border: none; border-radius: 4px; background: #89b4fa; color: #11111b; font-size: 12px; font-weight: 600; cursor: pointer; }
 .cd-saved-connect:hover { background: #74a8f5; }
 .cd-saved-delete { padding: 2px 6px; border: none; border-radius: 4px; background: transparent; color: #585b70; font-size: 11px; cursor: pointer; flex-shrink: 0; margin-right: 6px; }
 .cd-saved-delete:hover { background: rgba(243,139,168,0.2); color: #f38ba8; }

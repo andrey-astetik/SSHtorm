@@ -5,6 +5,9 @@ electron/dist/
 electron/tmp/
 .DS_Store
 *.log
+*.jpg
+*.jpeg
+IMAGE *
 .env
 .env.*
 !.env.example
