@@ -13,7 +13,7 @@ import KeyChainIcon from '../compAst/icons/KeyChain.vue';
 import LockIcon from '../compAst/icons/Lock.vue';
 
 // Point these at the real repository / release assets before shipping.
-const REPO = 'https://github.com/USERNAME/SSHtorm';
+const REPO = 'https://github.com/andrey-astetik/SSHtorm';
 const RELEASES = `${REPO}/releases/latest`;
 
 let observer;
