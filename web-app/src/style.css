@@ -1,0 +1,92 @@
+@import "tailwindcss";
+
+:root {
+    --bg1: #11111b;
+    --bg2: #1e1e2e;
+    --text: #cdd6f4;
+    --hint: #a6adc8;
+    --accent: #89b4fa;
+
+    --red: #f38ba8;
+    --pink: #f5c2e7;
+    --purple: #cba6f7;
+    --orrange: #fab387;
+}
+
+*, *::before, *::after {
+    overscroll-behavior: none;
+    -webkit-overflow-scrolling: auto;
+}
+
+html, body, #root {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    margin: 0;
+    padding: 0;
+    background-color: #11111b;
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+/* Hide scrollbars but allow scrolling */
+.hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+.hide-scrollbar::-webkit-scrollbar {
+    display: none;
+}
+
+/* Scrollbar styling for the dark theme */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background: #45475a;
+    border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #585b70;
+}
+
+/* Remove number input spinners */
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+input[type='number'] {
+    -moz-appearance: textfield;
+}
+
+select {
+    -webkit-appearance: none !important;
+}
+
+/* Selection color */
+::selection {
+    background: rgba(137, 180, 250, 0.3);
+}
+
+/* ── Text selection ──
+   The UI is an app chrome, not a document: disable text selection everywhere by
+   default so dragging across labels/toolbars/lists doesn't highlight garbage.
+   Real content areas opt back in below — a direct user-select declaration always
+   beats the value inherited from body, regardless of specificity. */
+body {
+    user-select: none;
+    -webkit-user-select: none;
+}
+input,
+textarea,
+[contenteditable="true"],
+.selectable,
+.selectable * {
+    user-select: text;
+    -webkit-user-select: text;
+}

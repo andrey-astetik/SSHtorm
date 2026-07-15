@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, user-scalable=no, viewport-fit=cover">
+		<meta name="theme-color" content="#ffffff">
+		<meta content="IE=Edge" http-equiv="X-UA-Compatible">
+    	<!-- <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'"> -->
+		<meta names="apple-mobile-web-app-status-bar-style" content="black-translucent">
+		<meta name="apple-mobile-web-app-capable" content="yes">
+		<meta name="mobile-web-app-capable" content="yes">
+		
+		<title>AI Translator</title>
+        
+        <link rel="stylesheet" href="dist/google_icons/_.css?1" />
+		<link rel="stylesheet" href="./css/bootstrap.css">
+		<script src="./js/jquery.js"></script>
+
+        <!-- Prism JS -->
+        <link rel="stylesheet" href="dist/prism/bundle.css?1">
+        <script src="dist/prism/bundle.js?1"></script>
+
+		<link rel="stylesheet" href="./css/main.css">
+    </head>
+    <body>
+        <div id="appContent">
+            <div id="pages">
+                <div page="translator" class="p-3 d-flex flex-column justify-content-between align-items-center">
+                    <div class="col-12 d-flex align-items-center justify-content-between mb-3">
+                        <div class="p-0 pe-2" style="flex: 1 1 auto;">
+                            <select id="settings-fromLang" class="w-100">
+                                <option value="auto">Auto</option>
+                                <option value="English">English</option>
+                                <option value="German">German</option>
+                                <option value="Russian">Russian</option>
+                            </select>
+                        </div>
+                        <div>
+                            <span class="material-symbols-rounded" id="switchLangBtn">sync_alt</span>
+                        </div>
+                        <div class="p-0 ps-2" style="flex: 1 1 auto;">
+                            <select id="settings-toLang" class="w-100">
+                                <option value="English">English</option>
+                                <option value="German">German</option>
+                                <option value="Russian">Russian</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="col-12 mb-3" style="flex: 1 1 auto;">
+                        <textarea class="col-12 h-100 no-resize" id="fromText" placeholder="Start typing something here"></textarea>
+                    </div>
+
+                    <div class="col-12" style="flex: 1 1 auto;">
+                        <textarea class="col-12 h-100 no-resize" id="toText" readonly="true" placeholder="Translation will be here"></textarea>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="chatToasts"></div>
+
+        <script type="text/javascript" src="js/main.js"></script>
+    </body>
+</html>

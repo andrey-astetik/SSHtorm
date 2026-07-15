@@ -1,0 +1,47 @@
+{
+  "name": "ssh-desktop",
+  "version": "1.0.0",
+  "main": "app.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "mac_build": "npx electron-builder build --mac",
+    "win_build": "npx electron-builder build --win --x64"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "SSH Remote Desktop - Fake OS over SSH",
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "astetik.sshdesktop",
+    "productName": "SSHtorm",
+    "copyright": "me",
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.developer-tools"
+    },
+    "files": [
+      "app.js",
+      "preload.js",
+      "modules/**/*",
+      "tmp/**/*",
+      "node_modules/**/*",
+      "!node_modules/electron/**",
+      "!node_modules/electron-builder/**"
+    ],
+    "extraResources": [
+      {
+        "from": "../web-app/dist",
+        "to": "web-dist"
+      }
+    ]
+  },
+  "dependencies": {
+    "ssh2": "^1.17.0"
+  }
+}
