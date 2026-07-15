@@ -1,5 +1,6 @@
 node_modules/
 web-app/dist/
+promo/dist/
 electron/dist/
 electron/web/dist/
 electron/tmp/
