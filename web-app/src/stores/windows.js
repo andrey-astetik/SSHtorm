@@ -4,7 +4,11 @@ import { reactive, ref } from 'vue';
 const _wm = (() => {
     if (globalThis.__wmStore) return globalThis.__wmStore;
 
-    const state = reactive({ windows: [], nextZ: 100, nextId: 1, activeWindowId: null });
+    // Set while a window is being dragged or resized. The desktop covers everything
+    // with a transparent shield meanwhile: <webview> runs out of process and swallows
+    // the pointer, so document-level mousemove/mouseup stop arriving once the cursor
+    // reaches page content. interactCursor is what that shield wears.
+    const state = reactive({ windows: [], nextZ: 100, nextId: 1, activeWindowId: null, interacting: false, interactCursor: 'default' });
     const anyMaximized = ref(false);
     function recompute() { anyMaximized.value = state.windows.some(w => w.maximized); }
 
@@ -15,9 +19,23 @@ const _wm = (() => {
         return id;
     }
 
-    function closeWindow(id) {
+    // A window that can lose work on close registers a guard. Returning false vetoes
+    // the close; the window then prompts and calls closeWindow(id, { force: true }).
+    // Outside `state` because it holds functions, not data.
+    const closeGuards = new Map();
+    function registerCloseGuard(id, fn) { closeGuards.set(id, fn); }
+    function unregisterCloseGuard(id) { closeGuards.delete(id); }
+
+    // force: skip the guard, for when there is nothing left to save to.
+    function closeWindow(id, { force = false } = {}) {
+        if (!force) {
+            const guard = closeGuards.get(id);
+            if (guard && guard() === false) return false;
+        }
+        closeGuards.delete(id);
         const i = state.windows.findIndex(w => w.id === id);
         if (i !== -1) { state.windows.splice(i, 1); if (state.activeWindowId === id) state.activeWindowId = state.windows.length ? state.windows[state.windows.length - 1].id : null; recompute(); }
+        return true;
     }
 
     function focusWindow(id) {
@@ -53,7 +71,7 @@ const _wm = (() => {
     function updateWindow(id, updates) { const w = state.windows.find(w => w.id === id); if (w) Object.assign(w, updates); }
     function hasWindowOfType(type) { return state.windows.some(w => w.type === type); }
 
-    return globalThis.__wmStore = { state, anyMaximized, openWindow, closeWindow, focusWindow, minimizeWindow, toggleMaximize, centerWindow, updateWindow, hasWindowOfType };
+    return globalThis.__wmStore = { state, anyMaximized, openWindow, closeWindow, registerCloseGuard, unregisterCloseGuard, focusWindow, minimizeWindow, toggleMaximize, centerWindow, updateWindow, hasWindowOfType };
 })();
 
 export { _wm as windowManager };

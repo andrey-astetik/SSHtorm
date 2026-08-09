@@ -123,17 +123,15 @@ onMounted(() => {
             }
         });
     }
-    // Binary download results
+    // Download progress; the transfer itself never enters the renderer.
     let unsubDl = null;
     if (window.app) {
         unsubDl = window.app.recieve((msg) => {
-            if (msg.method === 'ssh.sftp.binaryResult' && msg.data?.sessionId === props.sessionId) {
-                const { base64, path: dlPath } = msg.data;
-                if (base64 && window.__pendingDownload === dlPath) {
-                    window.__pendingDownload = null;
-                    window.app.saveFile(dlPath.split('/').pop(), base64);
-                }
-            }
+            if (msg.method !== 'ssh.sftp.downloadProgress' || msg.data?.sessionId !== props.sessionId) return;
+            const d = download.value;
+            if (!d || d.path !== msg.data.path) return;
+            d.transferred = msg.data.transferred;
+            if (msg.data.total) d.total = msg.data.total;
         });
     }
     // Directory stat results → feed predictive permission checks
@@ -145,7 +143,11 @@ onMounted(() => {
             }
         });
     }
-    onBeforeUnmount(() => { u1(); unsubRead(); unsubExec(); unsubWrite && unsubWrite(); unsubDl(); unsubStat && unsubStat(); document.removeEventListener('click', onGlobalClick); });
+    // Conditional: outside Electron none of these were ever assigned.
+    onBeforeUnmount(() => {
+        [u1, unsubRead, unsubExec, unsubWrite, unsubDl, unsubStat].forEach(fn => { if (fn) fn(); });
+        document.removeEventListener('click', onGlobalClick);
+    });
     loadIdInfo();   // background — does not block the initial listing
     loadDir('/');
     document.addEventListener('click', onGlobalClick);
@@ -349,21 +351,31 @@ function handleUpload(e) {
 }
 
 // ── Download ──
-async function downloadFile(file) {
+// Destination first, then main streams remote → disk. No file contents cross into
+// the renderer, so the UI stays live and there is no size cap.
+const download = ref(null);   // { path, name, transferred, total } while running
+
+async function triggerDownload(file) {
     if (!file || file.isDirectory) return;
     hideContextMenu();
-    const fp = fullPath(file.name);
     if (!window.app) return;
-    // Read binary via sftp
-    window.app.ssh.sftp.readBinary(props.sessionId, fp);
+    const fp = fullPath(file.name);
+    download.value = { path: fp, name: file.name, transferred: 0, total: file.size || 0 };
+    try {
+        const res = await window.app.ssh.sftp.download(props.sessionId, fp);
+        if (res?.error) error.value = `Download failed: ${res.error}`;
+    } catch (e) {
+        error.value = `Download failed: ${e.message}`;
+    } finally {
+        download.value = null;
+    }
 }
-// Listen for binary result in onMounted
-// (handled via unsubDl in onMounted)
 
-function triggerDownload(file) {
-    window.__pendingDownload = fullPath(file.name);
-    downloadFile(file);
-}
+const downloadPct = computed(() => {
+    const d = download.value;
+    if (!d || !d.total) return null;
+    return Math.min(100, Math.round((d.transferred / d.total) * 100));
+});
 
 // ── Zip / Unzip ──
 function zipFile(file) {
@@ -436,6 +448,18 @@ function onGlobalClick() { hideContextMenu(); }
 
         <div v-if="loading" class="p-5 text-center text-[#a6adc8]">Loading...</div>
         <div v-if="error" class="p-5 text-center text-[#f38ba8]">{{ error }}</div>
+
+        <!-- Download progress — the browsing UI stays usable while it runs -->
+        <div v-if="download" class="flex items-center gap-2 px-2 py-1 bg-[#181825] border-b border-[#313244] shrink-0 text-[11px]">
+            <span class="text-[#89b4fa] shrink-0">↓</span>
+            <span class="truncate text-[#cdd6f4]">{{ download.name }}</span>
+            <div class="flex-1 h-1 min-w-[40px] bg-white/10 rounded overflow-hidden">
+                <div class="h-full bg-[#89b4fa] transition-[width] duration-150" :style="{ width: (downloadPct ?? 0) + '%' }"></div>
+            </div>
+            <span class="shrink-0 text-[#a6adc8] font-mono">
+                {{ downloadPct !== null ? downloadPct + '%' : formatSize(download.transferred) }}
+            </span>
+        </div>
 
         <div class="flex flex-1 overflow-hidden">
             <!-- File list -->

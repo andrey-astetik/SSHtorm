@@ -3,7 +3,9 @@ import { ref, computed, onMounted, onBeforeUnmount, provide } from 'vue';
 import { windowManager } from '../../stores/windows.js';
 
 const props = defineProps({
-    windowId: Number
+    windowId: Number,
+    // Belongs to a session that isn't the active one — kept mounted, painted off.
+    hidden: { type: Boolean, default: false }
 });
 
 const emit = defineEmits(['close']);
@@ -14,27 +16,68 @@ const TASKBAR_H = 36;
 const win = computed(() => windowManager.state.windows.find(w => w.id === props.windowId));
 const isActive = computed(() => windowManager.state.activeWindowId === props.windowId);
 
-// Dragging state
+// Controls inside a drag region: `@click.stop` on the button stops only `click`,
+// while `mousedown` and `dblclick` keep bubbling here. Checked centrally so
+// titlebars rendered by slot content obey the same rule.
+const CONTROL_SELECTOR = 'button, input, textarea, select, a, [data-no-drag]';
+const isControl = (e) => !!e.target?.closest?.(CONTROL_SELECTOR);
+
+// A press below this stays a click and moves nothing. Without the threshold the
+// shield would go up on mousedown and take the mouseup with it, leaving the browser
+// no pair to build a click — let alone a dblclick — from.
+const DRAG_THRESHOLD_PX = 3;
+
+// pendingDrag/pendingResize: pressed, not yet past the threshold.
 const dragging = ref(false);
+const pendingDrag = ref(false);
 const dragStart = ref({ x: 0, y: 0 });
 const winStart = ref({ x: 0, y: 0 });
 
 // Resizing state
 const resizing = ref(false);
+const pendingResize = ref(false);
 const resizeEdge = ref('');
 const resizeStart = ref({ x: 0, y: 0, w: 0, h: 0, winX: 0, winY: 0 });
 
+function movedEnough(e, from) {
+    return Math.abs(e.clientX - from.x) >= DRAG_THRESHOLD_PX
+        || Math.abs(e.clientY - from.y) >= DRAG_THRESHOLD_PX;
+}
+
+function beginInteraction(cursor) {
+    windowManager.state.interactCursor = cursor;
+    windowManager.state.interacting = true;
+}
+
+function endInteraction() {
+    windowManager.state.interacting = false;
+}
+
 function onTitleMouseDown(e) {
+    if (isControl(e)) return;
     if (win.value?.maximized) return;
-    dragging.value = true;
+    pendingDrag.value = true;
     dragStart.value = { x: e.clientX, y: e.clientY };
     winStart.value = { x: win.value.x, y: win.value.y };
     document.addEventListener('mousemove', onDragMove);
     document.addEventListener('mouseup', onDragEnd);
 }
 
+// Not on the window controls, where it would fight with the button's own action.
+function onTitleDblClick(e) {
+    if (isControl(e)) return;
+    windowManager.toggleMaximize(props.windowId);
+}
+
 function onDragMove(e) {
-    if (!dragging.value || !win.value) return;
+    if (!win.value) return;
+    if (pendingDrag.value) {
+        if (!movedEnough(e, dragStart.value)) return;
+        pendingDrag.value = false;
+        dragging.value = true;
+        beginInteraction('grabbing');
+    }
+    if (!dragging.value) return;
     const dx = e.clientX - dragStart.value.x;
     const dy = e.clientY - dragStart.value.y;
     windowManager.updateWindow(props.windowId, {
@@ -45,13 +88,26 @@ function onDragMove(e) {
 
 function onDragEnd() {
     dragging.value = false;
+    pendingDrag.value = false;
+    endInteraction();
     document.removeEventListener('mousemove', onDragMove);
     document.removeEventListener('mouseup', onDragEnd);
 }
 
+// The shield wears the handle's own cursor so it doesn't change under the pointer.
+function cursorForEdge(edge) {
+    if (edge === 'n' || edge === 's') return 'ns-resize';
+    if (edge === 'e' || edge === 'w') return 'ew-resize';
+    if (edge === 'ne' || edge === 'sw') return 'nesw-resize';
+    return 'nwse-resize';
+}
+
 function onResizeStart(e, edge) {
     if (win.value?.maximized) return;
-    resizing.value = true;
+    pendingResize.value = true;
+    // Handles stopPropagation below, so the frame's mousedown->focus never runs.
+    // Without this the shield can end up beneath a foreground window's webview.
+    windowManager.focusWindow(props.windowId);
     resizeEdge.value = edge;
     resizeStart.value = {
         x: e.clientX,
@@ -68,7 +124,14 @@ function onResizeStart(e, edge) {
 }
 
 function onResizeMove(e) {
-    if (!resizing.value || !win.value) return;
+    if (!win.value) return;
+    if (pendingResize.value) {
+        if (!movedEnough(e, resizeStart.value)) return;
+        pendingResize.value = false;
+        resizing.value = true;
+        beginInteraction(cursorForEdge(resizeEdge.value));
+    }
+    if (!resizing.value) return;
     const dx = e.clientX - resizeStart.value.x;
     const dy = e.clientY - resizeStart.value.y;
     const updates = {};
@@ -94,6 +157,8 @@ function onResizeMove(e) {
 
 function onResizeEnd() {
     resizing.value = false;
+    pendingResize.value = false;
+    endInteraction();
     document.removeEventListener('mousemove', onResizeMove);
     document.removeEventListener('mouseup', onResizeEnd);
 }
@@ -102,22 +167,38 @@ function focus() {
     windowManager.focusWindow(props.windowId);
 }
 
+// Content may veto (unsaved edits): don't announce a close that didn't happen.
+function requestClose() {
+    if (windowManager.closeWindow(props.windowId)) emit('close');
+}
+
 // Expose this window's chrome so slot content that hides the default titlebar
 // (e.g. the browser, which puts its tabs there) can render its own titlebar with
 // working drag + min/max/close. Avoids Teleport, which corrupts the vdom when
 // teleporting from slotted content.
 const maximized = computed(() => !!win.value?.maximized);
+
+// Windows stay mounted off-screen, so timer-driven pollers need to know when
+// nobody is looking.
+const windowVisible = computed(() => !props.hidden && !win.value?.minimized);
+provide('windowVisible', windowVisible);
+
 provide('windowChrome', {
     windowId: props.windowId,
     focus: () => windowManager.focusWindow(props.windowId),
     startDrag: onTitleMouseDown,
+    // Custom titlebars use this rather than toggleMaximize, for the control check.
+    titleDblClick: onTitleDblClick,
     minimize: () => windowManager.minimizeWindow(props.windowId),
     toggleMaximize: () => windowManager.toggleMaximize(props.windowId),
-    close: () => { windowManager.closeWindow(props.windowId); emit('close'); },
+    // A vetoed close must not report itself as a close.
+    close: () => { if (windowManager.closeWindow(props.windowId)) emit('close'); },
     maximized
 });
 
 onBeforeUnmount(() => {
+    // Unmounting mid-gesture would strand the shield.
+    if (dragging.value || resizing.value) endInteraction();
     document.removeEventListener('mousemove', onDragMove);
     document.removeEventListener('mouseup', onDragEnd);
     document.removeEventListener('mousemove', onResizeMove);
@@ -139,7 +220,7 @@ onBeforeUnmount(() => {
             width: win.w + 'px',
             height: win.h + 'px',
             zIndex: win.z,
-            display: win.minimized ? 'none' : undefined
+            display: (win.minimized || hidden) ? 'none' : undefined
         }"
         @mousedown="focus"
     >
@@ -158,7 +239,7 @@ onBeforeUnmount(() => {
             v-if="!win.customTitlebar"
             class="window-titlebar"
             @mousedown="onTitleMouseDown"
-            @dblclick="windowManager.toggleMaximize(props.windowId)"
+            @dblclick="onTitleDblClick"
         >
             <div class="window-title">{{ win.title }}</div>
             <div class="window-controls">
@@ -166,7 +247,7 @@ onBeforeUnmount(() => {
                 <button class="win-btn win-max" @click.stop="windowManager.toggleMaximize(props.windowId)">
                     {{ win.maximized ? '❐' : '□' }}
                 </button>
-                <button class="win-btn win-close" @click.stop="windowManager.closeWindow(props.windowId); $emit('close')">✕</button>
+                <button class="win-btn win-close" @click.stop="requestClose">✕</button>
             </div>
         </div>
 

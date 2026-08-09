@@ -66,8 +66,7 @@ function connectWith(host) {
 
 function connect() {
     if (!form.host || !form.username) { error.value = 'Host and username required'; return; }
-    if (!form.password && !form.privateKey) { error.value = 'Password or private key required'; return; }
-
+    // Password and key are both optional: "none" auth or an ssh-agent identity.
     connecting.value = true;
     error.value = '';
 
@@ -142,7 +141,7 @@ onMounted(() => loadSavedHosts());
                     <div class="cd-row"><label class="cd-label">Host</label><input v-model="form.host" class="cd-input" placeholder="192.168.1.1" /></div>
                     <div class="cd-row"><label class="cd-label">Port</label><input v-model.number="form.port" class="cd-input cd-input-short" type="number" /></div>
                     <div class="cd-row"><label class="cd-label">Username</label><input v-model="form.username" class="cd-input" placeholder="root" /></div>
-                    <div class="cd-row"><label class="cd-label">Password</label><input v-model="form.password" class="cd-input" type="password" placeholder="Enter password" /></div>
+                    <div class="cd-row"><label class="cd-label">Password <span class="cd-optional">(optional)</span></label><input v-model="form.password" class="cd-input" type="password" placeholder="Leave empty for agent / no auth" /></div>
                     <div v-if="showAdvanced" class="cd-row"><label class="cd-label">Private Key</label><textarea v-model="form.privateKey" class="cd-textarea" rows="4"></textarea></div>
                     <button class="cd-toggle" @click="showAdvanced=!showAdvanced">{{ showAdvanced ? '- Hide' : '+ Private key' }}</button>
                 </div>

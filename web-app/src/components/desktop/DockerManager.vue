@@ -9,6 +9,8 @@ import TrashIcon from '../../compAst/icons/Trash.vue';
 
 const props = defineProps({ sessionId: Number });
 const openTerminalCmd = inject('openTerminalCmd', null);
+// From WindowFrame; always visible when rendered standalone.
+const visible = inject('windowVisible', computed(() => true));
 
 const tab = ref('containers');           // 'containers' | 'images'
 const status = ref('checking');          // 'checking' | 'ok' | 'unavailable'
@@ -76,7 +78,8 @@ function setTab(t) { tab.value = t; if (t === 'images') loadImages(); }
 
 onMounted(() => {
     check();
-    timer = setInterval(() => { if (autoRefresh.value && status.value === 'ok') load(); }, 4000);
+    // Windows of a non-active session stay mounted but must not keep polling.
+    timer = setInterval(() => { if (visible.value && autoRefresh.value && status.value === 'ok') load(); }, 4000);
 });
 onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 </script>

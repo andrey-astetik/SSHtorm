@@ -23,7 +23,12 @@
     "copyright": "me",
     "mac": {
       "target": "dmg",
-      "category": "public.app-category.developer-tools"
+      "category": "public.app-category.developer-tools",
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSLocalNetworkUsageDescription": "SSHtorm needs local network access to reach SSH servers on your LAN (e.g. 192.168.x.x)."
+      }
     },
     "files": [
       "app.js",

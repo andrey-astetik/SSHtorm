@@ -6,7 +6,8 @@ const {
     protocol,
     net,
     session: electronSession,
-    webContents
+    webContents,
+    Menu
 } = require('electron');
 const { Client } = require('ssh2');
 const fs = require('fs');
@@ -300,6 +301,39 @@ async function applyBrowserProfile(sessionId, webContentsId) {
     }
 }
 
+// ─── Connection error messages ───────────────────────────
+// RFC1918 / CGNAT / link-local literals — the ranges macOS treats as "local
+// network" and gates behind an explicit user permission.
+function isLocalNetworkAddress(host) {
+    const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(String(host || ''));
+    if (!m) return false;
+    const [a, b] = [+m[1], +m[2]];
+    return a === 10
+        || (a === 172 && b >= 16 && b <= 31)
+        || (a === 192 && b === 168)
+        || (a === 169 && b === 254)
+        || (a === 100 && b >= 64 && b <= 127);
+}
+
+// macOS 15+ denies local-network traffic without the Local Network grant and it
+// surfaces as a bare EHOSTUNREACH. No API exposes the grant, so the two causes are
+// told apart by timing: a TCC denial is refused immediately, an absent host only
+// fails once ARP retries time out.
+const TCC_DENIAL_MAX_MS = 250;
+
+function describeConnectError(err, host, elapsedMs) {
+    const msg = err?.message || String(err);
+    if (err?.code !== 'EHOSTUNREACH' || process.platform !== 'darwin' || !isLocalNetworkAddress(host)) {
+        return msg;
+    }
+    const grantHint = 'System Settings → Privacy & Security → Local Network (grant SSHtorm, then reconnect)';
+    if (elapsedMs !== undefined && elapsedMs > TCC_DENIAL_MAX_MS) {
+        return `No route to ${host} — the host did not respond. If it should be reachable, check ${grantHint}.`;
+    }
+    return `Cannot reach ${host} — macOS is most likely blocking local network access for this app. ` +
+        `Open ${grantHint}. If it is already granted, the host itself is unreachable.`;
+}
+
 // ─── IPC: SSH Connect ────────────────────────────────────
 function startConnection(win, opts) {
     const { sessionId: requestedId, host, port, username, password, privateKey } = opts;
@@ -310,6 +344,8 @@ function startConnection(win, opts) {
     session.host = host;
     session.user = username;
     session.connectOpts = { ...opts, sessionId };   // kept for host-key reconnect
+
+    let connectStartedAt = 0;   // see describeConnectError()
 
     const connOptions = {
         host: host,
@@ -327,6 +363,10 @@ function startConnection(win, opts) {
     } else if (password) {
         connOptions.password = password;
     }
+
+    // Both credentials may legitimately be empty: the server may allow "none" auth,
+    // or the identity may live in an ssh-agent.
+    if (process.env.SSH_AUTH_SOCK) connOptions.agent = process.env.SSH_AUTH_SOCK;
 
     connOptions.tryKeyboard = true;
 
@@ -360,7 +400,10 @@ function startConnection(win, opts) {
             destroySession(sessionId);
             return;
         }
-        sendToRenderer(win, 'ssh.error', { sessionId, error: err.message });
+        sendToRenderer(win, 'ssh.error', {
+            sessionId,
+            error: describeConnectError(err, host, Date.now() - connectStartedAt)
+        });
         destroySession(sessionId);
     });
 
@@ -377,10 +420,11 @@ function startConnection(win, opts) {
     });
 
     try {
+        connectStartedAt = Date.now();
         session.conn.connect(connOptions);
         sendToRenderer(win, 'ssh.connecting', { sessionId, host, username });
     } catch (err) {
-        sendToRenderer(win, 'ssh.error', { sessionId, error: err.message });
+        sendToRenderer(win, 'ssh.error', { sessionId, error: describeConnectError(err, host, Date.now() - connectStartedAt) });
         destroySession(sessionId);
     }
 }
@@ -449,6 +493,17 @@ function handleShellStart(event, { sessionId, shellId, cols, rows }) {
         // Disable Nagle on the shell stream for responsive terminal
         try { stream._sock?.setNoDelay?.(true); } catch (e) {}
 
+        // Tells "the user typed exit" apart from "the shell died under us": the
+        // server sends exit-status only for a shell that ended on its own, a killed
+        // shell reports exit-signal, and a dropped connection reports nothing.
+        // ssh2 emits exit(code) for the first and exit(null, signalName, …) for the second.
+        let exitCode = null;
+        let exitSignal = null;
+        stream.on('exit', (code, signal) => {
+            if (typeof code === 'number') exitCode = code;
+            if (signal) exitSignal = signal;
+        });
+
         stream.on('data', (data) => {
             sendToRenderer(win, 'ssh.shell.output', {
                 sessionId,
@@ -467,7 +522,13 @@ function handleShellStart(event, { sessionId, shellId, cols, rows }) {
 
         stream.on('close', () => {
             delete session.shells[shellId];
-            sendToRenderer(win, 'ssh.shell.closed', { sessionId, shellId });
+            sendToRenderer(win, 'ssh.shell.closed', {
+                sessionId,
+                shellId,
+                exitCode,
+                signal: exitSignal,
+                clean: exitCode !== null && !exitSignal
+            });
         });
 
         sendToRenderer(win, 'ssh.shell.started', { sessionId, shellId });
@@ -506,7 +567,24 @@ function handleSftpList(event, { sessionId, path: dirPath }) {
     });
 }
 
-function handleSftpRead(event, { sessionId, path: filePath }) {
+// Same rule git uses: a NUL byte in the first 8 KB means binary. The control-byte
+// ratio is a second net for binaries that happen to contain no NULs.
+function looksBinary(sample) {
+    const n = Math.min(sample.length, 8000);
+    if (n === 0) return false;
+    let control = 0;
+    for (let i = 0; i < n; i++) {
+        const b = sample[i];
+        if (b === 0) return true;
+        // Printable, plus the whitespace/escape bytes that legitimately occur in text.
+        const isText = b >= 0x20 || b === 0x09 || b === 0x0a || b === 0x0d || b === 0x0c || b === 0x08 || b === 0x1b;
+        if (!isText) control++;
+    }
+    return control / n > 0.1;
+}
+
+// `force` skips the binary gate — set once the user has confirmed in the editor.
+function handleSftpRead(event, { sessionId, path: filePath, force }) {
     const session = sessions[sessionId];
     if (!session?.sftp) {
         const win = BrowserWindow.fromWebContents(event.sender);
@@ -530,14 +608,27 @@ function handleSftpRead(event, { sessionId, path: filePath }) {
                     return;
                 }
                 if (bytesRead > 0) {
-                    buffer = Buffer.concat([buffer, data.slice(0, bytesRead)]);
+                    const chunkData = data.slice(0, bytesRead);
+                    // Decided on the first chunk so a refused file is never pulled whole.
+                    if (buffer.length === 0 && !force && looksBinary(chunkData)) {
+                        session.sftp.close(handle, () => {});
+                        sendToRenderer(win, 'ssh.sftp.readResult', { sessionId, path: filePath, binary: true });
+                        return;
+                    }
+                    buffer = Buffer.concat([buffer, chunkData]);
                     readMore();
                 } else {
                     session.sftp.close(handle, () => {});
                     const content = buffer.toString('utf-8');
+                    const truncated = content.length > 512000;
+                    // Both flags put the editor in read-only: it writes its whole
+                    // buffer back on save, which would truncate the file or write a
+                    // lossy UTF-8 decode of binary over the original.
                     sendToRenderer(win, 'ssh.sftp.readResult', {
                         sessionId, path: filePath,
-                        content: content.length > 512000 ? content.slice(0, 512000) + '\n...truncated' : content
+                        truncated,
+                        binaryConfirmed: !!force && looksBinary(buffer),
+                        content: truncated ? content.slice(0, 512000) + '\n...truncated' : content
                     });
                 }
             });
@@ -774,28 +865,108 @@ mainWindow.webContents.setWindowOpenHandler((details) => {
     });
 }
 
+// ─── Application menu ────────────────────────────────────
+// Built explicitly to leave Cmd/Ctrl+W and Cmd/Ctrl+M unbound: the default menu
+// maps them to the native window, and menu accelerators are consumed before the
+// renderer sees the keystroke, so the in-app windows could never claim them.
+function buildAppMenu() {
+    const isMac = process.platform === 'darwin';
+    const isDev = process.argv.includes('--dev');
+    const template = [
+        ...(isMac ? [{
+            label: app.name,
+            submenu: [
+                { role: 'about' },
+                { type: 'separator' },
+                { role: 'services' },
+                { type: 'separator' },
+                { role: 'hide' },
+                { role: 'hideOthers' },
+                { role: 'unhide' },
+                { type: 'separator' },
+                { role: 'quit' }
+            ]
+        }] : []),
+        {
+            label: 'Edit',
+            submenu: [
+                { role: 'undo' },
+                { role: 'redo' },
+                { type: 'separator' },
+                { role: 'cut' },
+                { role: 'copy' },
+                { role: 'paste' },
+                { role: 'selectAll' }
+            ]
+        },
+        {
+            label: 'View',
+            submenu: [
+                { role: 'reload' },
+                { role: 'forceReload' },
+                ...(isDev ? [{ role: 'toggleDevTools' }] : []),
+                { type: 'separator' },
+                { role: 'resetZoom' },
+                { role: 'zoomIn' },
+                { role: 'zoomOut' },
+                { type: 'separator' },
+                { role: 'togglefullscreen' }
+            ]
+        },
+        ...(isMac ? [] : [{ label: 'File', submenu: [{ role: 'quit' }] }])
+    ];
+    Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 // ─── App Lifecycle ───────────────────────────────────────
 app.whenReady().then(() => {
+    buildAppMenu();
+
     // Renderer can query native maximize state on demand — no timers
     ipcMain.handle('get-native-max-state', () => {
         return mainWindow?.isFullScreen?.() || false;
     });
 
-    // File save dialog
-    ipcMain.handle('dialog.saveFile', async (event, { fileName, base64 }) => {
+    // Destination first, then stream SFTP straight to that file. fastGet pipelines
+    // its reads; issuing them sequentially caps throughput at one 64KB chunk per
+    // round trip.
+    ipcMain.handle('sftp.download', async (event, { sessionId, path: remotePath }) => {
+        const session = sessions[sessionId];
+        if (!session?.sftp) return { success: false, error: 'SFTP not available' };
+
         const { dialog } = require('electron');
-        const fs = require('fs');
-        const result = await dialog.showSaveDialog(mainWindow, {
-            defaultPath: fileName,
+        const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+        const result = await dialog.showSaveDialog(win, {
+            defaultPath: path.basename(remotePath),
             title: 'Save file'
         });
         if (result.canceled || !result.filePath) return { success: false, canceled: true };
-        try {
-            fs.writeFileSync(result.filePath, Buffer.from(base64, 'base64'));
-            return { success: true };
-        } catch (e) {
-            return { success: false, error: e.message };
-        }
+        const localPath = result.filePath;
+
+        return new Promise((resolve) => {
+            let lastTick = 0;
+            session.sftp.fastGet(remotePath, localPath, {
+                concurrency: 64,
+                chunkSize: 32768,
+                step: (transferred, _chunk, total) => {
+                    // Throttle: a chunk callback per 32KB would flood the renderer.
+                    const now = Date.now();
+                    if (now - lastTick < 200 && transferred !== total) return;
+                    lastTick = now;
+                    sendToRenderer(win, 'ssh.sftp.downloadProgress', {
+                        sessionId, path: remotePath, transferred, total
+                    });
+                }
+            }, (err) => {
+                if (err) {
+                    // A silently truncated download on disk is worse than none.
+                    try { fs.unlinkSync(localPath); } catch (e) {}
+                    resolve({ success: false, error: err.message });
+                    return;
+                }
+                resolve({ success: true, path: localPath });
+            });
+        });
     });
 
     // Run a command and return its captured output as a promise. Unlike the
@@ -990,6 +1161,12 @@ app.whenReady().then(() => {
             if (stream) stream.write(data);
         } else if (method === 'start') {
             handleShellStart(event, { sessionId, shellId, cols, rows });
+        } else if (method === 'stop') {
+            const stream = sessions[sessionId]?.shells?.[shellId];
+            if (stream) {
+                delete sessions[sessionId].shells[shellId];
+                try { stream.close(); } catch (e) {}
+            }
         } else if (method === 'resize') {
             const stream = sessions[sessionId]?.shells?.[shellId];
             // ssh2 signature is setWindow(rows, cols, height, width) — rows FIRST.
@@ -1028,6 +1205,9 @@ app.whenReady().then(() => {
                             sessionId: pend.sessionId,
                             error: `Host key for ${pend.id} changed and was not trusted — connection refused.`
                         });
+                        // The mismatch already tore the session down and suppressed its
+                        // ssh.disconnected pending this decision; send it now.
+                        sendToRenderer(win, 'ssh.disconnected', { sessionId: pend.sessionId });
                     }
                 }
                 break;

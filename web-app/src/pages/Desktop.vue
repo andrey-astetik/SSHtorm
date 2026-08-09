@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, provide, watch, computed } from 'vue';
+import { ref, onMounted, onBeforeUnmount, provide, watch, computed } from 'vue';
 import { windowManager } from '../stores/windows.js';
 import { ssh } from '../stores/ssh.js';
 import WindowFrame from '../components/desktop/WindowFrame.vue';
@@ -35,10 +35,11 @@ function loadHostsAfterUnlock() {
     }
 }
 
-// Windows visible on desktop — only from the active session.
-const visibleWindows = computed(() =>
-    windowManager.state.windows.filter(w => w.sessionId === ssh.state.activeSessionId)
-);
+// Every window stays mounted; windows of other sessions are hidden. Filtering the
+// v-for instead unmounts them, and an unmounted TerminalWindow takes its shell,
+// scrollback and running program with it on every session switch.
+const allWindows = computed(() => windowManager.state.windows);
+const isForActiveSession = (w) => w.sessionId === ssh.state.activeSessionId;
 
 watch(() => ssh.state.lastConnectedSessionId, (sid) => {
     if (sid) setTimeout(() => openTerminal(), 200);
@@ -180,6 +181,35 @@ function onDisconnect() {
         ssh.disconnect(connectedSessionId.value);
     }
 }
+
+// ─── Window shortcuts ───────────────────────────────────
+// activeWindowId is global and can still point at a hidden window after a session
+// switch, so act only on something actually on screen.
+function shortcutTarget() {
+    const onScreen = windowManager.state.windows.filter(w => isForActiveSession(w) && !w.minimized);
+    const active = onScreen.find(w => w.id === windowManager.state.activeWindowId);
+    if (active) return active.id;
+    const front = onScreen.reduce((a, b) => (!a || b.z > a.z ? b : a), null);
+    return front ? front.id : null;
+}
+
+function onShortcut(e) {
+    if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+    const key = e.key.toLowerCase();
+    if (key !== 'w' && key !== 'm') return;
+
+    e.preventDefault();
+    const id = shortcutTarget();
+    if (id == null) return;
+    // Via the close guard, so an editor with unsaved edits still gets to prompt.
+    if (key === 'w') windowManager.closeWindow(id);
+    else windowManager.minimizeWindow(id);
+}
+
+// Capture phase: xterm and the editor's textarea see keydown first and could
+// otherwise swallow these.
+onMounted(() => window.addEventListener('keydown', onShortcut, true));
+onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true));
 </script>
 
 <template>
@@ -211,15 +241,17 @@ function onDisconnect() {
         />
 
         <WindowFrame
-            v-for="win in visibleWindows"
+            v-for="win in allWindows"
             :key="win.id"
             :window-id="win.id"
+            :hidden="!isForActiveSession(win)"
         >
             <TerminalWindow
                 v-if="win.component === 'TerminalWindow'"
                 :session-id="win.sessionId || connectedSessionId"
                 :cwd="win.cwd"
                 :init-cmd="win.initCmd"
+                @close="windowManager.closeWindow(win.id)"
             />
             <FileExplorer
                 v-else-if="win.component === 'FileExplorer'"
@@ -266,6 +298,13 @@ function onDisconnect() {
             </div>
         </div>
 
+        <!-- Drag/resize shield — keeps the pointer out of any <webview>. -->
+        <div
+            v-if="windowManager.state.interacting"
+            class="desktop-drag-shield"
+            :style="{ cursor: windowManager.state.interactCursor }"
+        ></div>
+
         <Taskbar />
     </div>
 </template>
@@ -288,6 +327,12 @@ function onDisconnect() {
         radial-gradient(ellipse at 50% 80%, rgba(166, 227, 161, 0.05) 0%, transparent 60%),
         linear-gradient(180deg, #1e1e2e 0%, #11111b 100%);
     z-index: 0;
+}
+/* Invisible, and above every window — those top out well below 15000. */
+.desktop-drag-shield {
+    position: fixed;
+    inset: 0;
+    z-index: 14000;
 }
 .desktop-sidebar-overlay {
     position: fixed;

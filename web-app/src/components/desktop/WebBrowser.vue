@@ -213,7 +213,7 @@ onMounted(async () => {
         <!-- Titlebar: tabs live here (Chrome-style). The bar itself is the window
              drag handle; tabs/buttons stop propagation. Controls are always
              present so the window stays closeable even before the tunnel is up. -->
-        <div class="bw-titlebar" @mousedown="chrome?.startDrag($event)" @dblclick="chrome?.toggleMaximize()">
+        <div class="bw-titlebar" @mousedown="chrome?.startDrag($event)" @dblclick="chrome?.titleDblClick($event)">
             <div v-show="partition" class="browser-tabs tabs-in-titlebar" @mousedown.stop @dblclick.stop>
                 <div
                     v-for="t in tabs"

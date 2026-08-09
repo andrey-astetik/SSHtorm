@@ -12,6 +12,9 @@ const props = defineProps({
     initCmd: { type: String, default: null }  // run this command once the shell is ready (e.g. docker exec/logs)
 });
 
+// Emitted when the remote shell exited on its own; the desktop closes the window.
+const emit = defineEmits(['close']);
+
 const terminalEl = ref(null);
 let term = null;
 let fitAddon = null;
@@ -23,6 +26,9 @@ const shellId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
 // Debounced resize
 let resizeTimer = null;
 let resizeObserver = null;
+// Last geometry pushed to the remote pty.
+let lastCols = 0;
+let lastRows = 0;
 let unsubIpc = null;
 let unsubClosed = null;
 let unsubStarted = null;
@@ -94,7 +100,10 @@ function initTerminal() {
     });
     unsubClosed = ssh.on(props.sessionId, 'ssh.shell.closed', (data) => {
         if (data.shellId !== shellId) return;
-        term.write('\r\n\x1b[31m[Shell closed]\x1b[0m\r\n');
+        // Anything but a clean exit stays on screen so the reason stays readable.
+        if (data.clean) { emit('close'); return; }
+        const why = data.signal ? `[Shell terminated: SIG${String(data.signal).replace(/^SIG/, '')}]` : '[Shell closed]';
+        term.write(`\r\n\x1b[31m${why}\x1b[0m\r\n`);
     });
     // Once the remote shell is ready, cd into the requested directory and/or run
     // an init command (leading space keeps it out of history when
@@ -114,10 +123,22 @@ function initTerminal() {
     // rAF re-fit catches sizes that are only correct after layout settles
     // (e.g. window maximize), which is where xterm tends to render garbage.
     function doFit() {
+        const el = terminalEl.value;
+        // A hidden window has no layout box, and FitAddon reads the parent's computed
+        // height back as `auto` → NaN. Resizing the pty to that leaves every line
+        // wrapping at the wrong column until the next real resize.
+        if (!el || !el.offsetParent || el.clientWidth < 2 || el.clientHeight < 2) return;
         try {
             fitAddon.fit();
-            if (window.app) window.app.ssh.shell.resize(props.sessionId, shellId, term.cols, term.rows);
-            term.refresh(0, term.rows - 1);
+            const { cols, rows } = term;
+            if (!Number.isFinite(cols) || !Number.isFinite(rows) || cols < 2 || rows < 1) return;
+            // setWindow on every observer tick makes vim/htop redraw for nothing.
+            if (cols !== lastCols || rows !== lastRows) {
+                lastCols = cols;
+                lastRows = rows;
+                if (window.app) window.app.ssh.shell.resize(props.sessionId, shellId, cols, rows);
+            }
+            term.refresh(0, rows - 1);
         } catch (e) {}
     }
 
@@ -133,6 +154,8 @@ function initTerminal() {
 
     // Start the SSH shell
     if (window.app) {
+        lastCols = term.cols;
+        lastRows = term.rows;
         window.app.ssh.shell.start(props.sessionId, shellId, term.cols, term.rows);
     }
 }
@@ -144,6 +167,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
     if (resizeTimer) clearTimeout(resizeTimer);
     if (resizeObserver) resizeObserver.disconnect();
+    if (window.app) window.app.ssh.shell.stop(props.sessionId, shellId);
     if (unsubIpc) unsubIpc();
     if (unsubClosed) unsubClosed();
     if (unsubStarted) unsubStarted();

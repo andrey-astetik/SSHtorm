@@ -1,8 +1,10 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount, computed } from 'vue';
+import { ref, onMounted, onBeforeUnmount, computed, inject } from 'vue';
 import { ssh } from '../../stores/ssh.js';
 
 const props = defineProps({ sessionId: [Number, String] });
+// From WindowFrame; always visible when rendered standalone.
+const visible = inject('windowVisible', computed(() => true));
 const sid = computed(() => props.sessionId || ssh.state.activeSessionId);
 
 const cpuUsage = ref(null);
@@ -81,7 +83,9 @@ onMounted(() => {
         });
     }
     fetchAll();
-    timer = setInterval(fetchAll, 3000);
+    // Hidden windows stay mounted so a session switch doesn't reset them, but they
+    // have nothing to update.
+    timer = setInterval(() => { if (visible.value) fetchAll(); }, 3000);
 });
 onBeforeUnmount(() => {
     if (timer) clearInterval(timer);

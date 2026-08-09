@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Outbound sockets (SSH, port forwards, the SOCKS tunnel). -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <!-- Loopback listeners: the per-session SOCKS5 proxy and `ssh -L` forwards. -->
+    <key>com.apple.security.network.server</key>
+    <true/>
+    <!-- Electron ships a JIT-enabled JS engine; required under hardened runtime. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+</dict>
+</plist>

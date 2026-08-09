@@ -23,16 +23,24 @@ contextBridge.exposeInMainWorld('app', {
         shell: {
             start: (sessionId, shellId, cols, rows) => ipcRenderer.send('ssh-shell', { method: 'start', sessionId, shellId, cols, rows }),
             input: (sessionId, shellId, data) => ipcRenderer.send('ssh-shell', { method: 'input', sessionId, shellId, data }),
-            resize: (sessionId, shellId, cols, rows) => ipcRenderer.send('ssh-shell', { method: 'resize', sessionId, shellId, cols, rows })
+            resize: (sessionId, shellId, cols, rows) => ipcRenderer.send('ssh-shell', { method: 'resize', sessionId, shellId, cols, rows }),
+            // Without this a closed terminal leaks its shell for the rest of the
+            // session, and MaxSessions (default 10) starts refusing new ones.
+            stop: (sessionId, shellId) => ipcRenderer.send('ssh-shell', { method: 'stop', sessionId, shellId })
         },
         sftp: {
             list: (sessionId, path) => ipcRenderer.send('reciever', { method: 'ssh.sftp.list', data: { sessionId, path } }),
-            read: (sessionId, path) => ipcRenderer.send('reciever', { method: 'ssh.sftp.read', data: { sessionId, path } }),
+            // force: read even if the file looks binary (user confirmed the prompt).
+            read: (sessionId, path, force) => ipcRenderer.send('reciever', { method: 'ssh.sftp.read', data: { sessionId, path, force } }),
             write: (sessionId, path, content, base64) => ipcRenderer.send('reciever', { method: 'ssh.sftp.write', data: { sessionId, path, content, base64 } }),
             mkdir: (sessionId, path) => ipcRenderer.send('reciever', { method: 'ssh.sftp.mkdir', data: { sessionId, path } }),
             delete: (sessionId, path, isDir) => ipcRenderer.send('reciever', { method: 'ssh.sftp.delete', data: { sessionId, path, isDir } }),
             stat: (sessionId, path) => ipcRenderer.send('reciever', { method: 'ssh.sftp.stat', data: { sessionId, path } }),
-            readBinary: (sessionId, path) => ipcRenderer.send('reciever', { method: 'ssh.sftp.readBinary', data: { sessionId, path } })
+            readBinary: (sessionId, path) => ipcRenderer.send('reciever', { method: 'ssh.sftp.readBinary', data: { sessionId, path } }),
+            // Prompts for a destination, then streams the file there. Resolves
+            // { success } | { canceled } | { error }; progress arrives as
+            // ssh.sftp.downloadProgress messages.
+            download: (sessionId, path) => ipcRenderer.invoke('sftp.download', { sessionId, path })
         }
     },
 
@@ -91,8 +99,6 @@ contextBridge.exposeInMainWorld('app', {
     },
 
     getNativeMaxState: () => ipcRenderer.invoke('get-native-max-state'),
-
-    saveFile: (fileName, base64) => ipcRenderer.invoke('dialog.saveFile', { fileName, base64 }),
 
     master: {
         status: () => ipcRenderer.send('reciever', { method: 'master.status' }),

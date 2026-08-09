@@ -1,5 +1,6 @@
 // SSH Connection Store — singleton (globalThis avoids Vite chunk duplication)
 import { reactive } from 'vue';
+import { windowManager } from './windows.js';
 
 const _store = (() => {
     if (globalThis.__sshStore) return globalThis.__sshStore;
@@ -36,16 +37,19 @@ const _store = (() => {
                 case 'ssh.disconnected':
                     if (s) { s.status = 'disconnected'; s.connected = false; }
                     if (state.hostKeyPrompt?.sessionId === sid) state.hostKeyPrompt = null;
-                    if (state.activeSessionId === sid)
-                        state.activeSessionId = +Object.entries(state.sessions).find(([,x]) => x.connected)?.[0] || null;
+                    // Deferred so this event's own listeners still run first — the
+                    // connect dialog reads them to report why the attempt failed.
+                    setTimeout(() => removeSession(sid), 0);
                     break;
                 case 'ssh.error': if (s) s.error = data.error; break;
                 case 'ssh.hostkey.changed': state.hostKeyPrompt = { ...data }; break;
                 case 'ssh.shell.started': if (s) s.shellActive = true; break;
                 case 'ssh.shell.closed': if (s) s.shellActive = false; break;
             }
+            // Copy: a callback may unsubscribe itself mid-iteration, which would
+            // otherwise skip the next listener.
             const cbs = state.listeners[sid]?.[method];
-            if (cbs) cbs.forEach(cb => cb(data));
+            if (cbs) cbs.slice().forEach(cb => cb(data));
         });
     }
 
@@ -63,10 +67,29 @@ const _store = (() => {
         return sid;
     }
 
+    // Drops the session's windows, listeners and sidebar row.
+    function removeSession(sid) {
+        if (!state.sessions[sid] && !state.listeners[sid]) return;
+        windowManager.state.windows
+            .filter(w => w.sessionId === sid)
+            // force: the connection is gone, so an unsaved-changes prompt would
+            // offer a save that cannot succeed.
+            .forEach(w => windowManager.closeWindow(w.id, { force: true }));
+        delete state.sessions[sid];
+        delete state.listeners[sid];
+        if (state.lastConnectedSessionId === sid) state.lastConnectedSessionId = null;
+        if (state.hostKeyPrompt?.sessionId === sid) state.hostKeyPrompt = null;
+        if (state.activeSessionId === sid) {
+            // Fall back to another live session rather than a blank desktop.
+            const next = Object.values(state.sessions).find(x => x.connected)
+                || Object.values(state.sessions)[0];
+            state.activeSessionId = next ? next.id : null;
+        }
+    }
+
     function disconnect(sid) {
         if (window.app) window.app.ssh.disconnect(sid);
-        delete state.sessions[sid]; delete state.listeners[sid];
-        if (state.activeSessionId === sid) state.activeSessionId = null;
+        removeSession(sid);
     }
 
     function on(sid, event, cb) {
@@ -90,7 +113,7 @@ const _store = (() => {
         state.hostKeyPrompt = null;
     }
 
-    return globalThis.__sshStore = { state, connect, disconnect, on, init, respondHostKey };
+    return globalThis.__sshStore = { state, connect, disconnect, removeSession, on, init, respondHostKey };
 })();
 
 export const ssh = _store;

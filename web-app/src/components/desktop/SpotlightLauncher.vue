@@ -123,9 +123,9 @@ watch(query, () => {
     selectedIndex.value = 0;
 });
 
-// Global hotkey: Cmd+K or Ctrl+K
+// Global hotkey: Cmd+K / Ctrl+K.
 function onGlobalKeydown(e) {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         if (visible.value) {
             close();
@@ -135,11 +135,12 @@ function onGlobalKeydown(e) {
     }
 }
 
+// Capture phase: the terminal and the editor's textarea handle keydown too.
 onMounted(() => {
-    window.addEventListener('keydown', onGlobalKeydown);
+    window.addEventListener('keydown', onGlobalKeydown, true);
 });
 onBeforeUnmount(() => {
-    window.removeEventListener('keydown', onGlobalKeydown);
+    window.removeEventListener('keydown', onGlobalKeydown, true);
 });
 
 // Expose open method for parent (taskbar button)
